@@ -24,17 +24,19 @@ from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 load_dotenv(override=True)
 
 SYSTEM_INSTRUCTION = f"""
-"You are an Azure Chatbot, a friendly, helpful robot.
+"You are an Azure Realtime LLM Chatbot, a friendly, helpful robot.
 
 Your goal is to demonstrate your capabilities in a succinct way.
 
 Your output will be converted to audio so don't include special characters in your answers.
 
 Respond to what the user said in a creative and helpful way. Keep your responses brief. One or two sentences at most.
+
+Start by greeting the user warmly and introducing yourself.
 """
 
-azure_api_key=os.getenv("AZURE_REALTIME_API_KEY"),
-azure_base_url=os.getenv("AZURE_REALTIME_BASE_URL")
+azure_api_key=os.getenv("AZURE_REALTIME_API_KEY", "")
+azure_base_url=os.getenv("AZURE_REALTIME_BASE_URL", "")
 
 async def run_bot(webrtc_connection):
     pipecat_transport = SmallWebRTCTransport(
@@ -50,7 +52,6 @@ async def run_bot(webrtc_connection):
         api_key=azure_api_key,
         base_url=azure_base_url,
         settings=AzureRealtimeLLMService.Settings(
-            voice="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
             system_instruction=SYSTEM_INSTRUCTION,
         ),
     )
