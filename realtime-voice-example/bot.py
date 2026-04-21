@@ -21,6 +21,69 @@ from pipecat.services.azure.realtime.llm import AzureRealtimeLLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
+# Monkey-patch to fix Azure Realtime API compatibility
+# Azure doesn't support certain fields that OpenAI's API does
+from pipecat.services.openai.realtime import events as openai_events
+import json
+
+# Patch SessionUpdateEvent
+_original_session_update_model_dump = openai_events.SessionUpdateEvent.model_dump
+
+def _patched_session_update_model_dump(self, *args, **kwargs):
+    dump = _original_session_update_model_dump(self, *args, **kwargs)
+    # Remove 'type' and 'object' fields that Azure doesn't support
+    if "session" in dump:
+        dump["session"].pop("type", None)
+        dump["session"].pop("object", None)
+    return dump
+
+openai_events.SessionUpdateEvent.model_dump = _patched_session_update_model_dump
+
+# Patch ResponseCreateEvent
+_original_response_create_model_dump = openai_events.ResponseCreateEvent.model_dump
+
+def _patched_response_create_model_dump(self, *args, **kwargs):
+    dump = _original_response_create_model_dump(self, *args, **kwargs)
+    # Remove 'output_modalities' field that Azure doesn't support
+    if "response" in dump and dump["response"]:
+        dump["response"].pop("output_modalities", None)
+    return dump
+
+openai_events.ResponseCreateEvent.model_dump = _patched_response_create_model_dump
+
+# Azure uses different event names than OpenAI - map them
+AZURE_TO_OPENAI_EVENT_MAP = {
+    "response.audio.delta": "response.output_audio.delta",
+    "response.audio.done": "response.output_audio.done",
+    "response.audio_transcript.delta": "response.output_audio_transcript.delta",
+    "response.audio_transcript.done": "response.output_audio_transcript.done",
+}
+
+# Patch parse_server_event to handle Azure-specific events
+_original_parse_server_event = openai_events.parse_server_event
+
+def _patched_parse_server_event(str_data):
+    try:
+        # First, try to map Azure event names to OpenAI event names
+        event = json.loads(str_data)
+        event_type = event.get("type", "")
+        
+        if event_type in AZURE_TO_OPENAI_EVENT_MAP:
+            event["type"] = AZURE_TO_OPENAI_EVENT_MAP[event_type]
+            str_data = json.dumps(event)
+        
+        return _original_parse_server_event(str_data)
+    except Exception as e:
+        # If it's an unimplemented event type, create a generic ServerEvent
+        if "Unimplemented server event type" in str(e):
+            event = json.loads(str_data)
+            logger.debug(f"Ignoring unhandled Azure event: {event.get('type', 'unknown')}")
+            # Return a generic ServerEvent that won't crash the pipeline
+            return openai_events.ServerEvent(event_id=event.get("event_id", ""), type=event.get("type", "unknown"))
+        raise
+
+openai_events.parse_server_event = _patched_parse_server_event
+
 load_dotenv(override=True)
 
 SYSTEM_INSTRUCTION = f"""
